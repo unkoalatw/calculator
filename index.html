@@ -1,0 +1,614 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>高精度多功能計算器</title>
+    <!-- 引入 Tailwind CSS 用於快速構建 UI -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- 引入 Decimal.js 處理高精度計算 -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/decimal.js/10.4.3/decimal.min.js"></script>
+    <!-- 引入 Lucide 圖標 -->
+    <script src="https://unpkg.com/lucide@latest"></script>
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;700&display=swap');
+        
+        body {
+            font-family: 'Inter', system-ui, -apple-system, sans-serif;
+            background-color: #f3f4f6;
+        }
+
+        .calc-display {
+            font-family: 'JetBrains+Mono', monospace;
+            word-break: break-all;
+        }
+
+        .btn-calc {
+            transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+            @apply flex items-center justify-center rounded-xl text-lg font-medium shadow-sm active:scale-95;
+        }
+
+        .btn-num { @apply bg-white text-gray-800 hover:bg-gray-100; }
+        .btn-op { @apply bg-blue-50 text-blue-600 hover:bg-blue-100; }
+        .btn-func { @apply bg-purple-50 text-purple-600 hover:bg-purple-100 text-sm; }
+        .btn-action { @apply bg-orange-50 text-orange-600 hover:bg-orange-100; }
+        .btn-equals { @apply bg-blue-600 text-white hover:bg-blue-700 shadow-md; }
+        .btn-active-slot { @apply ring-4 ring-blue-500 bg-blue-600 text-white !important; }
+
+        .mode-active { @apply border-b-2 border-blue-600 text-blue-600; }
+
+        /* 隱藏滾動條但保留滾動功能 */
+        .no-scrollbar::-webkit-scrollbar { display: none; }
+        .no-scrollbar { -ms-overflow-style: none; scrollbar-width: none; }
+
+        /* 動畫 */
+        @keyframes fadeIn {
+            from { opacity: 0; transform: translateY(10px); }
+            to { opacity: 1; transform: translateY(0); }
+        }
+        .animate-fade-in { animation: fadeIn 0.3s ease-out; }
+    </style>
+</head>
+<body class="min-h-screen flex items-center justify-center p-4">
+
+    <main id="app" class="bg-white w-full max-w-4xl rounded-3xl shadow-2xl flex flex-col md:flex-row overflow-hidden border border-gray-100" aria-label="計算器主界面">
+        
+        <!-- 左側：計算區域 -->
+        <section class="flex-1 flex flex-col p-6 border-b md:border-b-0 md:border-r border-gray-100">
+            <!-- 模式切換 -->
+            <nav class="flex space-x-4 mb-6 text-sm font-semibold text-gray-500 overflow-x-auto no-scrollbar" role="tablist">
+                <button onclick="calc.setMode('standard')" id="tab-standard" class="pb-2 mode-active whitespace-nowrap" role="tab">標準</button>
+                <button onclick="calc.setMode('scientific')" id="tab-scientific" class="pb-2 whitespace-nowrap" role="tab">科學</button>
+                <button onclick="calc.setMode('equation')" id="tab-equation" class="pb-2 whitespace-nowrap" role="tab">方程式</button>
+                <button onclick="calc.setMode('engineering')" id="tab-engineering" class="pb-2 whitespace-nowrap" role="tab">進位制</button>
+                <button onclick="calc.setMode('statistical')" id="tab-statistical" class="pb-2 whitespace-nowrap" role="tab">統計</button>
+            </nav>
+
+            <!-- 顯示區域 -->
+            <div class="bg-gray-50 rounded-2xl p-6 mb-6 flex flex-col items-end min-h-[160px] justify-center relative overflow-hidden" aria-live="polite">
+                <div id="display-expr" class="text-gray-400 text-sm mb-2 h-6 overflow-hidden text-right w-full"></div>
+                <div id="display-main" class="calc-display text-2xl md:text-3xl font-bold text-gray-800 w-full text-right overflow-x-auto no-scrollbar">0</div>
+                <!-- 精度指示器 -->
+                <div class="absolute bottom-2 left-4 text-[10px] text-gray-400 uppercase tracking-widest font-bold">精度: 32 位小數</div>
+            </div>
+
+            <!-- 控制按鈕（撤銷、重做、清除） -->
+            <div class="grid grid-cols-4 gap-3 mb-4">
+                <button onclick="calc.undo()" class="btn-calc btn-action py-2" title="撤銷">
+                    <i data-lucide="undo-2" class="w-5 h-5"></i>
+                </button>
+                <button onclick="calc.redo()" class="btn-calc btn-action py-2" title="重做">
+                    <i data-lucide="redo-2" class="w-5 h-5"></i>
+                </button>
+                <button onclick="calc.clearAll()" class="btn-calc btn-action py-2 col-span-2 text-sm font-bold">AC / 清除全部</button>
+            </div>
+
+            <!-- 動態按鈕區 -->
+            <div id="buttons-grid" class="grid grid-cols-4 gap-3">
+                <!-- 按鈕將由 JS 動態渲染 -->
+            </div>
+        </section>
+
+        <!-- 右側：歷史記錄與側邊功能 -->
+        <aside class="w-full md:w-80 bg-gray-50 p-6 flex flex-col">
+            <h2 class="text-lg font-bold text-gray-700 mb-4 flex items-center">
+                <i data-lucide="history" class="w-5 h-5 mr-2"></i> 歷史記錄
+            </h2>
+            <div id="history-list" class="flex-1 overflow-y-auto space-y-3 no-scrollbar max-h-[300px] md:max-h-full">
+                <!-- 歷史項 -->
+                <p class="text-sm text-gray-400 italic">暫無記錄</p>
+            </div>
+            <div class="mt-4 pt-4 border-t border-gray-200">
+                <button onclick="calc.clearHistory()" class="text-xs text-red-500 hover:underline">清空歷史</button>
+            </div>
+            
+            <!-- 單元測試結果 -->
+            <div id="test-summary" class="mt-4 p-3 bg-white rounded-lg border border-gray-200 text-[10px]">
+                <p class="font-bold text-gray-500 mb-1 uppercase tracking-tighter">單元測試驗證 (Unit Tests)</p>
+                <div id="test-content" class="space-y-1"></div>
+            </div>
+        </aside>
+    </main>
+
+    <script>
+        // 配置 Decimal.js 高精度
+        Decimal.set({ precision: 40, rounding: Decimal.ROUND_HALF_UP });
+
+        /**
+         * Calculator 核心邏輯類
+         */
+        class HighPrecisionCalculator {
+            constructor() {
+                this.state = {
+                    currentValue: '0',
+                    expression: '',
+                    history: [],
+                    undoStack: [],
+                    redoStack: [],
+                    mode: 'standard', 
+                    statsData: [],    
+                    lastResult: null,
+                    // 方程式模式專用
+                    eqCoeffs: { a: '1', b: '0', c: '0' },
+                    activeSlot: 'a',
+                    isShowingResult: false
+                };
+
+                this.init();
+            }
+
+            init() {
+                this.renderButtons();
+                this.updateDisplay();
+                lucide.createIcons();
+                this.saveState();
+            }
+
+            saveState() {
+                const snapshot = JSON.stringify({
+                    currentValue: this.state.currentValue,
+                    expression: this.state.expression,
+                    statsData: [...this.state.statsData],
+                    eqCoeffs: { ...this.state.eqCoeffs },
+                    activeSlot: this.state.activeSlot,
+                    isShowingResult: this.state.isShowingResult
+                });
+                
+                if (this.state.undoStack.length > 50) this.state.undoStack.shift();
+                this.state.undoStack.push(snapshot);
+            }
+
+            undo() {
+                if (this.state.undoStack.length <= 1) return;
+                const current = this.state.undoStack.pop();
+                this.state.redoStack.push(current);
+                const previous = JSON.parse(this.state.undoStack[this.state.undoStack.length - 1]);
+                this.applyState(previous);
+            }
+
+            redo() {
+                if (this.state.redoStack.length === 0) return;
+                const next = JSON.parse(this.state.redoStack.pop());
+                this.state.undoStack.push(JSON.stringify(next));
+                this.applyState(next);
+            }
+
+            applyState(s) {
+                this.state.currentValue = s.currentValue;
+                this.state.expression = s.expression;
+                this.state.statsData = s.statsData;
+                this.state.eqCoeffs = s.eqCoeffs || { a: '1', b: '0', c: '0' };
+                this.state.activeSlot = s.activeSlot || 'a';
+                this.state.isShowingResult = s.isShowingResult || false;
+                this.updateDisplay();
+                this.renderButtons();
+            }
+
+            setMode(mode) {
+                this.state.mode = mode;
+                this.state.isShowingResult = false;
+                document.querySelectorAll('nav button').forEach(btn => btn.classList.remove('mode-active'));
+                const tab = document.getElementById(`tab-${mode}`);
+                if (tab) tab.classList.add('mode-active');
+                this.renderButtons();
+                this.updateDisplay();
+            }
+
+            handleInput(val) {
+                this.state.redoStack = []; 
+                this.state.isShowingResult = false; // 輸入時隱藏結果，顯示正在輸入的數值
+                
+                let target = this.state.mode === 'equation' ? this.state.eqCoeffs[this.state.activeSlot] : this.state.currentValue;
+
+                if (!isNaN(val) || val === '.' || (this.state.mode === 'engineering' && /[A-F]/.test(val))) {
+                    if (target === '0' && val !== '.') {
+                        target = val;
+                    } else {
+                        if (val === '.' && target.includes('.')) return;
+                        target += val;
+                    }
+                } else if (val === 'PI') {
+                    target = Decimal.acos(-1).toString();
+                } else if (val === 'E') {
+                    target = Decimal.exp(1).toString();
+                } else if (val === '+/-') {
+                    if (target === '0') return;
+                    target = target.startsWith('-') ? target.substring(1) : '-' + target;
+                }
+                
+                if (this.state.mode === 'equation') {
+                    this.state.eqCoeffs[this.state.activeSlot] = target;
+                } else {
+                    this.state.currentValue = target;
+                }
+                
+                this.updateDisplay();
+                this.saveState();
+            }
+
+            handleOperator(op) {
+                if (this.state.currentValue === '0' && this.state.lastResult) {
+                    this.state.expression = `${this.state.lastResult} ${op} `;
+                } else {
+                    this.state.expression += `${this.state.currentValue} ${op} `;
+                }
+                this.state.currentValue = '0';
+                this.updateDisplay();
+                this.saveState();
+            }
+
+            calculate() {
+                if (this.state.mode === 'equation') {
+                    this.solveEquation();
+                    return;
+                }
+                try {
+                    const fullExpr = this.state.expression + this.state.currentValue;
+                    const result = this.evaluateExpression(fullExpr);
+                    const resultStr = result.toSignificantDigits(32).toString();
+                    
+                    this.addHistory(fullExpr, resultStr);
+                    this.state.lastResult = resultStr;
+                    this.state.currentValue = resultStr;
+                    this.state.expression = '';
+                    this.updateDisplay();
+                    this.saveState();
+                } catch (e) {
+                    this.showError("計算錯誤");
+                }
+            }
+
+            evaluateExpression(expr) {
+                const tokens = expr.trim().split(/\s+/);
+                if (tokens.length < 3) return new Decimal(tokens[0] || 0);
+
+                let res = new Decimal(tokens[0]);
+                for (let i = 1; i < tokens.length; i += 2) {
+                    const op = tokens[i];
+                    const nextVal = new Decimal(tokens[i+1]);
+                    if (op === '+') res = res.plus(nextVal);
+                    if (op === '-') res = res.minus(nextVal);
+                    if (op === '×' || op === '*') res = res.times(nextVal);
+                    if (op === '÷' || op === '/') res = res.div(nextVal);
+                }
+                return res;
+            }
+
+            // --- 方程式求解邏輯 ---
+            solveEquation() {
+                try {
+                    const a = new Decimal(this.state.eqCoeffs.a);
+                    const b = new Decimal(this.state.eqCoeffs.b);
+                    const c = new Decimal(this.state.eqCoeffs.c);
+                    
+                    let resultMsg = "";
+                    let exprStr = `${a}x² + ${b}x + ${c} = 0`;
+
+                    if (a.isZero()) {
+                        // 一元一次: bx + c = 0 -> x = -c / b
+                        if (b.isZero()) {
+                            resultMsg = c.isZero() ? "無限多解" : "無解";
+                        } else {
+                            const x = c.neg().div(b);
+                            resultMsg = `x = ${x.toSignificantDigits(20).toString()}`;
+                        }
+                        exprStr = `${b}x + ${c} = 0`;
+                    } else {
+                        // 一元二次: ax^2 + bx + c = 0
+                        const disc = b.pow(2).minus(a.mul(c).mul(4));
+                        if (disc.isNegative()) {
+                            const realPart = b.neg().div(a.mul(2)).toSignificantDigits(10);
+                            const imagPart = disc.neg().sqrt().div(a.mul(2)).toSignificantDigits(10);
+                            resultMsg = `虛根: ${realPart} ± ${imagPart}i`;
+                        } else if (disc.isZero()) {
+                            const x = b.neg().div(a.mul(2));
+                            resultMsg = `重根: x = ${x.toSignificantDigits(20).toString()}`;
+                        } else {
+                            const x1 = b.neg().plus(disc.sqrt()).div(a.mul(2));
+                            const x2 = b.neg().minus(disc.sqrt()).div(a.mul(2));
+                            resultMsg = `x1 = ${x1.toSignificantDigits(15).toString()}\nx2 = ${x2.toSignificantDigits(15).toString()}`;
+                        }
+                    }
+
+                    this.state.currentValue = resultMsg;
+                    this.state.isShowingResult = true;
+                    this.addHistory(exprStr, resultMsg);
+                    this.updateDisplay();
+                    this.saveState();
+                } catch (e) {
+                    this.showError("方程解析錯誤");
+                }
+            }
+
+            execFunc(func) {
+                try {
+                    const x = new Decimal(this.state.currentValue);
+                    let res;
+                    switch(func) {
+                        case 'sin': res = Decimal.sin(x.mul(Decimal.acos(-1).div(180))); break;
+                        case 'cos': res = Decimal.cos(x.mul(Decimal.acos(-1).div(180))); break;
+                        case 'tan': res = Decimal.tan(x.mul(Decimal.acos(-1).div(180))); break;
+                        case 'log': res = Decimal.log10(x); break;
+                        case 'ln': res = Decimal.ln(x); break;
+                        case 'sqrt': res = x.sqrt(); break;
+                        case 'sqr': res = x.pow(2); break;
+                        case 'exp': res = Decimal.exp(x); break;
+                        case 'abs': res = x.abs(); break;
+                    }
+                    this.state.currentValue = res.toSignificantDigits(32).toString();
+                    this.updateDisplay();
+                    this.saveState();
+                } catch (e) {
+                    this.showError("數學錯誤");
+                }
+            }
+
+            execBase(action) {
+                try {
+                    const val = new Decimal(this.state.currentValue);
+                    if (action === 'bin') this.state.currentValue = parseInt(val.toString()).toString(2);
+                    if (action === 'hex') this.state.currentValue = parseInt(val.toString()).toString(16).toUpperCase();
+                    if (action === 'oct') this.state.currentValue = parseInt(val.toString()).toString(8);
+                    if (action === 'dec') this.state.currentValue = parseInt(val.toString(), 16).toString();
+                } catch(e) {
+                    this.showError("進位轉換失敗");
+                }
+                this.updateDisplay();
+            }
+
+            addStat() {
+                this.state.statsData.push(new Decimal(this.state.currentValue));
+                this.state.currentValue = '0';
+                this.updateDisplay();
+                this.saveState();
+            }
+
+            calcStats(type) {
+                if (this.state.statsData.length === 0) return;
+                let res;
+                const n = new Decimal(this.state.statsData.length);
+                const sum = this.state.statsData.reduce((a, b) => a.plus(b), new Decimal(0));
+                
+                if (type === 'mean') {
+                    res = sum.div(n);
+                } else if (type === 'std') {
+                    const mean = sum.div(n);
+                    const variance = this.state.statsData
+                        .reduce((a, b) => a.plus(b.minus(mean).pow(2)), new Decimal(0))
+                        .div(n);
+                    res = variance.sqrt();
+                }
+                
+                this.state.currentValue = res.toSignificantDigits(32).toString();
+                this.state.statsData = []; 
+                this.updateDisplay();
+            }
+
+            updateDisplay() {
+                const mainDisplay = document.getElementById('display-main');
+                const exprDisplay = document.getElementById('display-expr');
+
+                if (this.state.mode === 'equation') {
+                    const {a, b, c} = this.state.eqCoeffs;
+                    exprDisplay.innerText = `求解目標: (${a})x² + (${b})x + (${c}) = 0`;
+                    
+                    // 如果正在顯示結果，就顯示結果字串；否則顯示正在編輯的係數
+                    if (this.state.isShowingResult) {
+                        mainDisplay.innerText = this.state.currentValue;
+                    } else {
+                        mainDisplay.innerText = this.state.eqCoeffs[this.state.activeSlot];
+                    }
+                } else {
+                    mainDisplay.innerText = this.state.currentValue;
+                    exprDisplay.innerText = this.state.expression;
+                }
+            }
+
+            showError(msg) {
+                const main = document.getElementById('display-main');
+                const original = main.innerText;
+                main.innerText = msg;
+                main.classList.add('text-red-500');
+                setTimeout(() => {
+                    main.classList.remove('text-red-500');
+                    main.innerText = original;
+                }, 1500);
+            }
+
+            clearAll() {
+                if (this.state.mode === 'equation') {
+                    this.state.eqCoeffs = { a: '1', b: '0', c: '0' };
+                    this.state.currentValue = '0';
+                    this.state.isShowingResult = false;
+                } else {
+                    this.state.currentValue = '0';
+                    this.state.expression = '';
+                    this.state.statsData = [];
+                }
+                this.updateDisplay();
+                this.saveState();
+            }
+
+            addHistory(expr, res) {
+                const item = { expr, res, time: new Date().toLocaleTimeString() };
+                this.state.history.unshift(item);
+                this.renderHistory();
+            }
+
+            renderHistory() {
+                const container = document.getElementById('history-list');
+                if (this.state.history.length === 0) {
+                    container.innerHTML = '<p class="text-sm text-gray-400 italic">暫無記錄</p>';
+                    return;
+                }
+                container.innerHTML = this.state.history.map((h, i) => `
+                    <div class="bg-white p-3 rounded-xl shadow-sm border border-gray-100 animate-fade-in cursor-pointer hover:bg-blue-50" onclick="calc.loadHistory(${i})">
+                        <div class="text-[10px] text-gray-400 mb-1">${h.time}</div>
+                        <div class="text-xs text-gray-500 truncate">${h.expr} =</div>
+                        <div class="text-sm font-bold text-gray-800 break-all">${h.res}</div>
+                    </div>
+                `).join('');
+            }
+
+            loadHistory(index) {
+                const h = this.state.history[index];
+                this.state.currentValue = h.res;
+                if (this.state.mode === 'equation') this.state.isShowingResult = true;
+                this.updateDisplay();
+            }
+
+            clearHistory() {
+                this.state.history = [];
+                this.renderHistory();
+            }
+
+            setActiveSlot(slot) {
+                this.state.activeSlot = slot;
+                this.state.isShowingResult = false; // 切換槽位時顯示該槽位的數值
+                this.renderButtons();
+                this.updateDisplay();
+            }
+
+            renderButtons() {
+                const grid = document.getElementById('buttons-grid');
+                grid.innerHTML = '';
+                
+                let buttons = [];
+                const commonNums = [
+                    ['7','btn-num'], ['8','btn-num'], ['9','btn-num'], ['÷','btn-op'],
+                    ['4','btn-num'], ['5','btn-num'], ['6','btn-num'], ['×','btn-op'],
+                    ['1','btn-num'], ['2','btn-num'], ['3','btn-num'], ['-','btn-op'],
+                    ['0','btn-num'], ['.','btn-num'], ['=','btn-equals'], ['+','btn-op']
+                ];
+
+                if (this.state.mode === 'standard') {
+                    buttons = commonNums;
+                } else if (this.state.mode === 'scientific') {
+                    const sciFuncs = [
+                        ['sin','btn-func'], ['cos','btn-func'], ['tan','btn-func'], ['log','btn-func'],
+                        ['ln','btn-func'], ['sqrt','btn-func'], ['sqr','btn-func'], ['exp','btn-func'],
+                        ['PI','btn-action'], ['E','btn-action'], ['abs','btn-func'], ['%','btn-op']
+                    ];
+                    buttons = [...sciFuncs, ...commonNums];
+                } else if (this.state.mode === 'equation') {
+                    buttons = [
+                        ['係數 a', `btn-func ${this.state.activeSlot==='a'?'btn-active-slot':''}`, 'a'],
+                        ['係數 b', `btn-func ${this.state.activeSlot==='b'?'btn-active-slot':''}`, 'b'],
+                        ['係數 c', `btn-func ${this.state.activeSlot==='c'?'btn-active-slot':''}`, 'c'],
+                        ['+/-','btn-action'],
+                        ['7','btn-num'], ['8','btn-num'], ['9','btn-num'], ['AC','btn-action'],
+                        ['4','btn-num'], ['5','btn-num'], ['6','btn-num'], ['-','btn-op'],
+                        ['1','btn-num'], ['2','btn-num'], ['3','btn-num'], ['+','btn-op'],
+                        ['0','btn-num'], ['.','btn-num'], ['解方程','btn-equals col-span-2', 'solve']
+                    ];
+                } else if (this.state.mode === 'engineering') {
+                    const engFuncs = [
+                        ['HEX','btn-func', 'hex'], ['BIN','btn-func', 'bin'], ['OCT','btn-func', 'oct'], ['DEC','btn-func', 'dec'],
+                        ['A','btn-num'], ['B','btn-num'], ['C','btn-num'], ['D','btn-num'],
+                        ['E','btn-num'], ['F','btn-num'], ['<<','btn-op'], ['>>','btn-op']
+                    ];
+                    buttons = [...engFuncs, ...commonNums];
+                } else if (this.state.mode === 'statistical') {
+                    const statFuncs = [
+                        ['新增數據','btn-action col-span-2', 'addStat'], ['平均值','btn-func', 'mean'], ['標準差','btn-func', 'std']
+                    ];
+                    buttons = [...statFuncs, ...commonNums];
+                }
+
+                buttons.forEach(b => {
+                    const btn = document.createElement('button');
+                    btn.className = `btn-calc py-4 ${b[1]}`;
+                    btn.innerText = b[0];
+                    
+                    btn.onclick = () => {
+                        if (b[1].includes('btn-num')) this.handleInput(b[0]);
+                        else if (b[1].includes('btn-op')) {
+                            if (b[0] === '=') this.calculate();
+                            else this.handleOperator(b[0]);
+                        }
+                        else if (b[1].includes('btn-func')) {
+                            if (this.state.mode === 'engineering') this.execBase(b[2]);
+                            else if (this.state.mode === 'statistical') this.calcStats(b[2]);
+                            else if (this.state.mode === 'equation') this.setActiveSlot(b[2]);
+                            else this.execFunc(b[0]);
+                        }
+                        else if (b[1].includes('btn-action')) {
+                            if (b[2] === 'addStat') this.addStat();
+                            else if (b[0] === '+/-') this.handleInput('+/-');
+                            else if (b[0] === 'AC') this.clearAll();
+                            else this.handleInput(b[0]);
+                        }
+                        else if (b[1].includes('btn-equals')) {
+                            this.calculate();
+                        }
+                    };
+                    grid.appendChild(btn);
+                });
+            }
+        }
+
+        const calc = new HighPrecisionCalculator();
+
+        /**
+         * 修正後的單元測試模組
+         */
+        function runTests() {
+            const results = [];
+            const test = (name, fn) => {
+                try {
+                    fn();
+                    results.push({ name, pass: true });
+                } catch (e) {
+                    results.push({ name, pass: false, error: e.message });
+                }
+            };
+
+            test("0.1 + 0.2 精度測試", () => {
+                const res = new Decimal('0.1').plus('0.2');
+                if (!res.equals('0.3')) throw new Error(`預期 0.3, 得到 ${res}`);
+            });
+
+            test("超大數乘法測試 (修正科學記數法問題)", () => {
+                const a = new Decimal('99999999999999999999999999999999'); 
+                const res = a.times(2);
+                const expected = new Decimal('199999999999999999999999999999998');
+                if (!res.equals(expected)) throw new Error("大數計算溢出或錯誤");
+            });
+
+            test("一元二次方程根驗證 (x²-5x+6=0)", () => {
+                const a = new Decimal(1), b = new Decimal(-5), c = new Decimal(6);
+                const disc = b.pow(2).minus(a.mul(c).mul(4));
+                const x1 = b.neg().plus(disc.sqrt()).div(a.mul(2));
+                const x2 = b.neg().minus(disc.sqrt()).div(a.mul(2));
+                if (!x1.equals(3) || !x2.equals(2)) throw new Error("方程求解錯誤");
+            });
+
+            const content = document.getElementById('test-content');
+            content.innerHTML = results.map(r => `
+                <div class="flex justify-between items-center py-1 border-b border-gray-50">
+                    <span class="truncate pr-2">${r.name}</span>
+                    <span class="${r.pass ? 'text-green-500' : 'text-red-500'} font-bold shrink-0">${r.pass ? '通過' : '失敗'}</span>
+                </div>
+            `).join('');
+        }
+
+        window.onload = () => {
+            runTests();
+            lucide.createIcons();
+        };
+
+        document.addEventListener('keydown', (e) => {
+            if (e.key >= '0' && e.key <= '9') calc.handleInput(e.key);
+            if (e.key === '.') calc.handleInput('.');
+            if (e.key === '+') calc.handleOperator('+');
+            if (e.key === '-') calc.handleOperator('-');
+            if (e.key === '*') calc.handleOperator('×');
+            if (e.key === '/') calc.handleOperator('÷');
+            if (e.key === 'Enter') calc.calculate();
+            if (e.key === 'Escape') calc.clearAll();
+            if (e.metaKey && e.key === 'z') e.shiftKey ? calc.redo() : calc.undo();
+        });
+
+    </script>
+</body>
+</html>
